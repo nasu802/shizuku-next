@@ -25,23 +25,27 @@ export default function Home() {
   const [timeLeft, setTimeLeft] = useState(focusSec);
   const [drops, setDrops] = useState(0);
 
-  // ミュート（永続）
+  // interval を即停止できるよう保持
+  const intervalRef = useRef<number | null>(null);
+
+  // ===== ミュート（永続） =====
   const [muted, setMuted] = useState(false);
   useEffect(() => { try { const v = localStorage.getItem(MUTE_KEY); if (v !== null) setMuted(v === "1"); } catch {} }, []);
   useEffect(() => { try { localStorage.setItem(MUTE_KEY, muted ? "1" : "0"); } catch {} }, [muted]);
 
-  // 設定変更は停止中なら即反映
+  // ===== “設定が変わったときだけ” 停止中なら反映（Pauseではリセットしない） =====
+  const isRunningRef = useRef(isRunning);
+  useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
   useEffect(() => {
-    if (!loaded) return;
-    if (!isRunning) setTimeLeft(mode === "focus" ? focusSec : breakSec);
-  }, [loaded, focusSec, breakSec, mode, isRunning]);
+    if (!loaded || isRunningRef.current) return; // ← 走行中は触らない
+    setTimeLeft(mode === "focus" ? focusSec : breakSec);
+  }, [loaded, focusSec, breakSec, mode]);
 
-  // 音
+  // ===== 音 =====
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [unlocked, setUnlocked] = useState(false);
   const lastPlayRef = useRef(0);
 
-  // 初期化
   useEffect(() => {
     const a = new Audio("/sounds/water-drop.mp3");
     a.preload = "auto";
@@ -49,7 +53,6 @@ export default function Home() {
     audioRef.current = a;
   }, []);
 
-  // ミュート切替で音量だけ反映
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = muted ? 0 : BASE_VOL;
   }, [muted]);
@@ -77,7 +80,6 @@ export default function Home() {
   }, [unlocked, muted]);
 
   function tinyVibrate(ms=8) {
-    // ✅ any を使わず、標準の型付き API をそのまま呼ぶ
     if (typeof navigator !== "undefined") {
       try { navigator.vibrate?.(ms); } catch {}
     }
@@ -90,11 +92,28 @@ export default function Home() {
     }
   }, []);
 
-  // タイマー
+  // ===== タイマー：isRunning の間だけ動作（IDを ref に保持） =====
   useEffect(() => {
+    // 既存 interval をクリア
+    if (intervalRef.current != null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     if (!isRunning || timeLeft <= 0) return;
-    const id = setInterval(() => setTimeLeft((t) => t - 1), 1000);
-    return () => clearInterval(id);
+
+    const id = window.setInterval(() => {
+      setTimeLeft((t) => Math.max(0, t - 1));
+    }, 1000);
+    intervalRef.current = id;
+
+    return () => {
+      if (intervalRef.current != null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      } else {
+        clearInterval(id);
+      }
+    };
   }, [isRunning, timeLeft]);
 
   // セッション内キュー管理
@@ -110,7 +129,7 @@ export default function Home() {
     }
   }, [mode, focusSec]);
 
-  // 1秒ごとの判定
+  // 1秒ごとの判定（視覚/序盤ナッジ/中間一回）
   useEffect(() => {
     if (!isRunning || mode !== "focus") return;
     const elapsed = Math.max(0, focusSec - timeLeft);
@@ -149,16 +168,32 @@ export default function Home() {
     }
   }, [isRunning, timeLeft, mode, focusSec, breakSec, playWithVolume]);
 
-  // 操作
+  // ===== 操作 =====
   async function togglePlayPause() {
-    if (!isRunning && !unlocked) await unlockAudio();
-    setIsRunning((v) => !v);
+    if (isRunning) {
+      // 即時停止（interval も止める）。timeLeft は保持＝純粋な一時停止
+      if (intervalRef.current != null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      setIsRunning(false);
+      return;
+    }
+    if (!unlocked) await unlockAudio();
+    setIsRunning(true);
   }
+
   function handleStop() {
+    // 完全停止（先頭に戻す）
+    if (intervalRef.current != null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     setIsRunning(false);
     setMode("focus");
     setTimeLeft(focusSec);
   }
+
   function toggleMute() { setMuted((m) => !m); }
 
   const mm = String(Math.floor(timeLeft / 60)).padStart(2, "0");
@@ -203,6 +238,9 @@ export default function Home() {
             <div className="font-mono tabular-nums text-6xl md:text-7xl tracking-wide">
               {mm}:{ss}
             </div>
+            {!isRunning && (
+              <div className="mt-1 text-xs text-slate-500">一時停止中</div>
+            )}
           </div>
 
           {/* コントロール */}
