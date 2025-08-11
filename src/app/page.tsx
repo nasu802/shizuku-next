@@ -41,7 +41,7 @@ export default function Home() {
   const [unlocked, setUnlocked] = useState(false);
   const lastPlayRef = useRef(0);
 
-  // 初期化（mutedはここで使わない→依存関係を安定化）
+  // 初期化
   useEffect(() => {
     const a = new Audio("/sounds/water-drop.mp3");
     a.preload = "auto";
@@ -77,12 +77,13 @@ export default function Home() {
   }, [unlocked, muted]);
 
   function tinyVibrate(ms=8) {
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-      try { (navigator as any).vibrate(ms); } catch {}
+    // ✅ any を使わず、標準の型付き API をそのまま呼ぶ
+    if (typeof navigator !== "undefined") {
+      try { navigator.vibrate?.(ms); } catch {}
     }
   }
 
-  // 視覚フィードバック（瓶UIへイベント通知）
+  // 視覚フィードバック（瓶UIへイベント）
   const visualTick = useCallback((elapsed:number, total:number) => {
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("shizuku:visual-tick", { detail: { elapsed, total }}));
@@ -204,6 +205,7 @@ export default function Home() {
             </div>
           </div>
 
+          {/* コントロール */}
           <div className="flex justify-center gap-3">
             <button
               onClick={togglePlayPause}
